@@ -371,7 +371,7 @@ int main(int argc, char *argv[]) {
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* send packet */
-      nwrite = sendto(udp_fd, buffer, BUFSIZE, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
+      nwrite = sendto(udp_fd, buffer, nread, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
 
