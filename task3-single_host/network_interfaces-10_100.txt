@@ -1,0 +1,11 @@
+auto lo
+iface lo inet loopback
+
+# Internal interface (intnet0)
+auto ethA
+iface ethA inet static
+	address		10.0.10.100
+	netmask		255.255.255.0
+	network		10.0.10.0
+	broadcast	10.0.10.255
+	gateway		10.0.10.1

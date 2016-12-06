@@ -1,0 +1,64 @@
+##############
+# macOS host #
+##############
+
+# (0) vboxnet0 <-> vboxnet1
+sysctl -w net.inet.ip.forwarding=1
+
+
+#################
+# VPN 10.1 (GW) #
+#################
+
+# (1) start server
+./simpletun -i tun0 -s -d
+ip addr add 10.0.5.10/24 dev tun0 && ifconfig tun0 up
+
+# (4) check tunnel
+ping 10.0.5.20
+
+# (5) route to 20 via tunnel
+route add -net 10.0.20.0 netmask 255.255.255.0 gw 10.0.5.10
+
+# (6) check routing
+ping 10.0.20.1
+
+# (10) ip forwarding
+sysctl -w net.ipv4.ip_forward=1
+
+
+#################
+# VPN 20.1 (GW) #
+#################
+
+# (2) start client
+./simpletun -i tun0 -c 192.168.10.5 -d
+ip addr add 10.0.5.20/24 dev tun0 && ifconfig tun0 up
+
+# (3) check tunnel
+ping 10.0.5.10
+
+# (7) route to 10 via tunnel
+route add -net 10.0.10.0 netmask 255.255.255.0 gw 10.0.5.20
+
+# (8) check routing
+ping 10.0.10.1
+
+# (9) ip forwarding
+sysctl -w net.ipv4.ip_forward=1
+
+
+###################
+# VPN 10.100 (PC) #
+###################
+
+# (11) check forwarding
+ping 10.0.20.100
+
+
+###################
+# VPN 20.100 (PC) #
+###################
+
+# (12) check forwarding
+ping 10.0.10.100
