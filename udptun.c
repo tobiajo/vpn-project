@@ -39,10 +39,12 @@
 #include <stdarg.h>
 
 /* buffer for reading from tun/tap interface, must be >= 1500 */
-#define BUFSIZE 2000   
+#define BUFSIZE 2000
+#define UDP_BUFSIZE 65536
 #define CLIENT 0
 #define SERVER 1
 #define PORT 55555
+#define UDP_PORT 4444
 
 /* some common lengths */
 #define IP_HDR_LEN 20
@@ -187,6 +189,7 @@ int main(int argc, char *argv[]) {
   uint16_t nread, nwrite, plength;
 //  uint16_t total_len, ethertype;
   char buffer[BUFSIZE];
+  char udp_buffer[UDP_BUFSIZE];
   struct sockaddr_in local, remote;
   char remote_ip[16] = "";
   unsigned short int port = PORT;
@@ -315,16 +318,40 @@ int main(int argc, char *argv[]) {
 
     do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
   }
+
+  /* init UDP */
+  struct sockaddr_in udp;
+  struct sockaddr_in udp_remote;
+  int udp_fd;
+
+  if ((udp_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    perror("UDP: socket()");
+    exit(1);
+  }
+
+  memset(&udp, 0, sizeof(udp));
+  udp.sin_family = AF_INET;
+  udp.sin_addr.s_addr = htonl(INADDR_ANY);
+  udp.sin_port = htons(UDP_PORT);
+
+  memcpy(&udp_remote, &remote, sizeof(remote));
+  udp_remote.sin_port = htons(UDP_PORT);
+
+  if (bind(udp_fd, (struct sockaddr*) &udp, sizeof(udp)) < 0){
+    perror("UDP: bind()");
+    exit(1);
+  }
   
   /* use select() to handle two descriptors at once */
   maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
+  maxfd = (udp_fd > maxfd)?udp_fd:maxfd;
 
   while(1) {
     int ret;
     fd_set rd_set;
 
     FD_ZERO(&rd_set);
-    FD_SET(tap_fd, &rd_set); FD_SET(net_fd, &rd_set);
+    FD_SET(tap_fd, &rd_set); FD_SET(net_fd, &rd_set); FD_SET(udp_fd, &rd_set);
 
     ret = select(maxfd + 1, &rd_set, NULL, NULL, NULL);
 
@@ -343,36 +370,49 @@ int main(int argc, char *argv[]) {
       nread = cread(tap_fd, buffer, BUFSIZE);
 
       tap2net++;
-      do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
+      //do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* write length + packet */
-      plength = htons(nread);
+      /*plength = htons(nread);
       nwrite = cwrite(net_fd, (char *)&plength, sizeof(plength));
-      nwrite = cwrite(net_fd, buffer, nread);
+      nwrite = cwrite(net_fd, buffer, nread);*/
+
+      sendto(udp_fd, buffer, BUFSIZE, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
       
-      do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
+      //do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
 
-    if(FD_ISSET(net_fd, &rd_set)){
+    if(FD_ISSET(udp_fd, &rd_set)){
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
 
+      struct sockaddr_in frombuf;
+      struct sockaddr *from = (struct sockaddr *) &frombuf;
+      size_t fromlen = sizeof(frombuf);
+      ssize_t rc;
+      rc = recvfrom(udp_fd, buffer, BUFSIZE, MSG_DONTWAIT, from, &fromlen);
+
+      nwrite = cwrite(tap_fd, buffer, rc);
+
+
+
+
       /* Read length */      
-      nread = read_n(net_fd, (char *)&plength, sizeof(plength));
-      if(nread == 0) {
+      //nread = read_n(net_fd, (char *)&plength, sizeof(plength));
+      //if(nread == 0) {
         /* ctrl-c at the other end */
-        break;
-      }
+        //break;
+      //}
 
       net2tap++;
 
       /* read packet */
-      nread = read_n(net_fd, buffer, ntohs(plength));
-      do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
+      //nread = read_n(net_fd, buffer, ntohs(plength));
+      //do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
-      nwrite = cwrite(tap_fd, buffer, nread);
-      do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
+      //nwrite = cwrite(tap_fd, buffer, nread);
+      //do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
     }
   }
   
