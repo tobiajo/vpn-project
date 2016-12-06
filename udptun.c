@@ -40,7 +40,6 @@
 
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000
-#define UDP_BUFSIZE 65536
 #define CLIENT 0
 #define SERVER 1
 #define PORT 55555
@@ -189,7 +188,6 @@ int main(int argc, char *argv[]) {
   uint16_t nread, nwrite, plength;
 //  uint16_t total_len, ethertype;
   char buffer[BUFSIZE];
-  char udp_buffer[UDP_BUFSIZE];
   struct sockaddr_in local, remote;
   char remote_ip[16] = "";
   unsigned short int port = PORT;
@@ -370,16 +368,11 @@ int main(int argc, char *argv[]) {
       nread = cread(tap_fd, buffer, BUFSIZE);
 
       tap2net++;
-      //do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
+      do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
-      /* write length + packet */
-      /*plength = htons(nread);
-      nwrite = cwrite(net_fd, (char *)&plength, sizeof(plength));
-      nwrite = cwrite(net_fd, buffer, nread);*/
-
-      sendto(udp_fd, buffer, BUFSIZE, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
-      
-      //do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
+      /* send packet */
+      nwrite = sendto(udp_fd, buffer, BUFSIZE, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
+      do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
 
     if(FD_ISSET(udp_fd, &rd_set)){
@@ -389,30 +382,16 @@ int main(int argc, char *argv[]) {
       struct sockaddr_in frombuf;
       struct sockaddr *from = (struct sockaddr *) &frombuf;
       size_t fromlen = sizeof(frombuf);
-      ssize_t rc;
-      rc = recvfrom(udp_fd, buffer, BUFSIZE, MSG_DONTWAIT, from, &fromlen);
-
-      nwrite = cwrite(tap_fd, buffer, rc);
-
-
-
-
-      /* Read length */      
-      //nread = read_n(net_fd, (char *)&plength, sizeof(plength));
-      //if(nread == 0) {
-        /* ctrl-c at the other end */
-        //break;
-      //}
 
       net2tap++;
 
       /* read packet */
-      //nread = read_n(net_fd, buffer, ntohs(plength));
-      //do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
+      nread = recvfrom(udp_fd, buffer, BUFSIZE, MSG_DONTWAIT, from, &fromlen);
+      do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
-      //nwrite = cwrite(tap_fd, buffer, nread);
-      //do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
+      nwrite = cwrite(tap_fd, buffer, nread);
+      do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
     }
   }
   
