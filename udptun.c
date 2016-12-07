@@ -202,6 +202,9 @@ void *udp_loop(void *args) {
   struct sockaddr_in udp;
   struct sockaddr_in udp_remote;
   int udp_fd;
+  struct sockaddr_in frombuf;
+  struct sockaddr *from = (struct sockaddr *) &frombuf;
+  size_t fromlen = sizeof(frombuf);
   int rc;
 
   BIO *for_reading = BIO_new(BIO_s_mem());
@@ -275,10 +278,6 @@ void *udp_loop(void *args) {
       /* data from the network: read it, and write it to the tun/tap interface. 
        * We need to read the length first, and then the packet */
 
-      struct sockaddr_in frombuf;
-      struct sockaddr *from = (struct sockaddr *) &frombuf;
-      size_t fromlen = sizeof(frombuf);
-
       net2tap++;
 
       /* read packet */
@@ -303,19 +302,31 @@ void *udp_loop(void *args) {
 /**************************************************************************
  * ctrl_loop: handles the ctrl loop.                                      *
  **************************************************************************/
+struct ctrl_loop_args {
+  int ctrl_fd_r;
+  int net_fd;
+  SSL *ssl;
+};
+
 void *ctrl_loop(void *args) {
-  int ctrl_fd_r = *((int *) args);
+  int ctrl_fd_r = ((struct ctrl_loop_args *) args)->ctrl_fd_r;
+  int net_fd = ((struct ctrl_loop_args *) args)->net_fd;
+  SSL *ssl = ((struct ctrl_loop_args *) args)->ssl;
 
   char buffer[BUFSIZE];
+  int maxfd;
+  uint16_t nread, nwrite, plength;
+
+  maxfd = (ctrl_fd_r > net_fd)?ctrl_fd_r:net_fd;
   
   while(1) {
     int ret;
     fd_set rd_set;
 
     FD_ZERO(&rd_set);
-    FD_SET(ctrl_fd_r, &rd_set);
+    FD_SET(ctrl_fd_r, &rd_set); FD_SET(net_fd, &rd_set);
 
-    ret = select(ctrl_fd_r+1, &rd_set, NULL, NULL, NULL);
+    ret = select(maxfd+1, &rd_set, NULL, NULL, NULL);
 
     if (ret < 0 && errno == EINTR){
       continue;
@@ -328,7 +339,12 @@ void *ctrl_loop(void *args) {
 
     if (FD_ISSET(ctrl_fd_r, &rd_set)) {
       cread(ctrl_fd_r, buffer, BUFSIZE);
-      printf("ctrl_loop: %s", buffer);
+      cwrite(net_fd, buffer, BUFSIZE);
+    }
+
+    if (FD_ISSET(net_fd, &rd_set)) {
+      read_n(net_fd, buffer, BUFSIZE);
+      printf("incoming msg: %s", buffer);
     }
   }
 }
@@ -476,6 +492,7 @@ int main(int argc, char *argv[]) {
   socklen_t remotelen;
   int cliserv = -1;    /* must be specified on cmd line */
   struct udp_loop_args udp_loop_args;
+  struct ctrl_loop_args ctrl_loop_args;
   pthread_t udp_thread;
   pthread_t ctrl_thread;
   char *line;
@@ -618,7 +635,10 @@ int main(int argc, char *argv[]) {
   mkfifo(ctrl_pipe, 0666);
   int ctrl_fd_r = open(ctrl_pipe, O_RDONLY|O_NONBLOCK);
   int ctrl_fd_w = open(ctrl_pipe, O_WRONLY|O_NONBLOCK);
-  pthread_create( &ctrl_thread, NULL, &ctrl_loop, (void *) (&ctrl_fd_r));
+  ctrl_loop_args.ctrl_fd_r = ctrl_fd_r;
+  ctrl_loop_args.net_fd = net_fd;
+  ctrl_loop_args.ssl = ssl;
+  pthread_create( &ctrl_thread, NULL, &ctrl_loop, (void *) &ctrl_loop_args);
 
   /* cmd prompt */
   do {
