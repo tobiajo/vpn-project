@@ -3,7 +3,7 @@
  *                                                                        *
  * Derived from:                                                          *
  *   http://www.cis.syr.edu/~wedu/seed/Labs/VPN/files/simpletun.c         *
- *************************************************************************/ 
+ **************************************************************************/ 
 
 #include <stdio.h>
 #include <stdlib.h>
