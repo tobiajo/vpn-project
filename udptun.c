@@ -76,7 +76,7 @@ int tun_alloc(char *dev, int flags) {
     strncpy(ifr.ifr_name, dev, IFNAMSIZ);
   }
 
-  if( (err = ioctl(fd, TUNSETIFF, (void *)&ifr)) < 0 ) {
+  if( (err = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0 ) {
     perror("ioctl(TUNSETIFF)");
     close(fd);
     return err;
@@ -213,7 +213,7 @@ void *udp_loop(void *args) {
   memcpy(&udp_remote, &remote, sizeof(remote));
   udp_remote.sin_port = htons(UDP_PORT);
 
-  if (bind(udp_fd, (struct sockaddr*) &udp, sizeof(udp)) < 0){
+  if (bind(udp_fd, (struct sockaddr *) &udp, sizeof(udp)) < 0){
     perror("UDP: bind()");
     exit(1);
   }
@@ -273,6 +273,40 @@ void *udp_loop(void *args) {
   }
 }
 
+/**************************************************************************
+ * ctrl_loop: handles the ctrl loop.                                      *
+ **************************************************************************/
+void *ctrl_loop(void *args) {
+  int ctrl_fd_r = *((int *) args);
+
+  char buffer[BUFSIZE];
+  
+  while(1) {
+    int ret;
+    fd_set rd_set;
+
+    FD_ZERO(&rd_set);
+    FD_SET(ctrl_fd_r, &rd_set);
+
+    ret = select(ctrl_fd_r+1, &rd_set, NULL, NULL, NULL);
+
+    if (ret < 0 && errno == EINTR){
+      continue;
+    }
+
+    if (ret < 0) {
+      perror("select()");
+      exit(1);
+    }
+
+    if (FD_ISSET(ctrl_fd_r, &rd_set)) {
+      cread(ctrl_fd_r, buffer, BUFSIZE);
+      printf("ctrl_loop: %s", buffer);
+    }
+  }
+}
+
+
 int main(int argc, char *argv[]) {
   
   int tap_fd, option;
@@ -288,6 +322,7 @@ int main(int argc, char *argv[]) {
   int cliserv = -1;    /* must be specified on cmd line */
   struct udp_loop_args udp_loop_args;
   pthread_t udp_thread;
+  pthread_t ctrl_thread;
   char *line;
   ssize_t bufsize = 0;
 
@@ -370,7 +405,7 @@ int main(int argc, char *argv[]) {
     remote.sin_port = htons(port);
 
     /* connection request */
-    if (connect(sock_fd, (struct sockaddr*) &remote, sizeof(remote)) < 0){
+    if (connect(sock_fd, (struct sockaddr *) &remote, sizeof(remote)) < 0){
       perror("connect()");
       exit(1);
     }
@@ -382,7 +417,7 @@ int main(int argc, char *argv[]) {
     /* Server, wait for connections */
 
     /* avoid EADDRINUSE error on bind() */
-    if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *)&optval, sizeof(optval)) < 0){
+    if(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, (char *) &optval, sizeof(optval)) < 0){
       perror("setsockopt()");
       exit(1);
     }
@@ -391,7 +426,7 @@ int main(int argc, char *argv[]) {
     local.sin_family = AF_INET;
     local.sin_addr.s_addr = htonl(INADDR_ANY);
     local.sin_port = htons(port);
-    if (bind(sock_fd, (struct sockaddr*) &local, sizeof(local)) < 0){
+    if (bind(sock_fd, (struct sockaddr *) &local, sizeof(local)) < 0){
       perror("bind()");
       exit(1);
     }
@@ -404,7 +439,7 @@ int main(int argc, char *argv[]) {
     /* wait for connection request */
     remotelen = sizeof(remote);
     memset(&remote, 0, remotelen);
-    if ((net_fd = accept(sock_fd, (struct sockaddr*)&remote, &remotelen)) < 0){
+    if ((net_fd = accept(sock_fd, (struct sockaddr *) &remote, &remotelen)) < 0){
       perror("accept()");
       exit(1);
     }
@@ -412,13 +447,23 @@ int main(int argc, char *argv[]) {
     do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
   }
 
+  /* udp */
   udp_loop_args.tap_fd = tap_fd;
   udp_loop_args.remote = remote;
   pthread_create(&udp_thread, NULL, udp_loop, (void *) &udp_loop_args);
 
+  /* ctrl */
+  char ctrl_pipe[] = "/tmp/ctrlpipe";
+  mkfifo(ctrl_pipe, 0666);
+  int ctrl_fd_r = open(ctrl_pipe, O_RDONLY|O_NONBLOCK);
+  int ctrl_fd_w = open(ctrl_pipe, O_WRONLY|O_NONBLOCK);
+  pthread_create( &ctrl_thread, NULL, &ctrl_loop, (void *) (&ctrl_fd_r));
+
+  /* cmd prompt */
   do {
     printf("> ");
-    getline(&line, &bufsize, stdin);
+    int line_len = getline(&line, &bufsize, stdin);
+    cwrite(ctrl_fd_w, line, line_len);
   } while (strcmp(line, "exit\n") != 0);
 
   return(0);
