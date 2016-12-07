@@ -1,24 +1,9 @@
 /**************************************************************************
- * simpletun.c                                                            *
+ * udptun.c                                                               *
  *                                                                        *
- * A simplistic, simple-minded, naive tunnelling program using tun/tap    *
- * interfaces and TCP. Handles (badly) IPv4 for tun, ARP and IPv4 for     *
- * tap. DO NOT USE THIS PROGRAM FOR SERIOUS PURPOSES.                     *
+ * Derived from:                                                          *
+ *   http://www.cis.syr.edu/~wedu/seed/Labs/VPN/files/simpletun.c         *
  *                                                                        *
- * You have been warned.                                                  *
- *                                                                        *
- * (C) 2009 Davide Brini.                                                 *
- *                                                                        *
- * DISCLAIMER AND WARNING: this is all work in progress. The code is      *
- * ugly, the algorithms are naive, error checking and input validation    *
- * are very basic, and of course there can be bugs. If that's not enough, *
- * the program has not been thoroughly tested, so it might even fail at   *
- * the few simple things it should be supposed to do right.               *
- * Needless to say, I take no responsibility whatsoever for what the      *
- * program might do. The program has been written mostly for learning     *
- * purposes, and can be used in the hope that is useful, but everything   *
- * is to be taken "as is" and without any kind of warranty, implicit or   *
- * explicit. See the file LICENSE for further details.                    *
  *************************************************************************/ 
 
 #include <stdio.h>
