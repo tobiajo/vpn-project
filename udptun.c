@@ -37,6 +37,7 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <stdarg.h>
+#include <pthread.h>
 
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000
@@ -178,23 +179,117 @@ void usage(void) {
   exit(1);
 }
 
+/**************************************************************************
+ * udp_loop: handles the udp tunnel.                                      *
+ **************************************************************************/
+struct udp_loop_args {
+  int tap_fd;
+  struct sockaddr_in remote;
+};
+
+void *udp_loop(void *args) {
+  int tap_fd = ((struct udp_loop_args *) args)->tap_fd;
+  struct sockaddr_in remote = ((struct udp_loop_args *) args)->remote;
+
+  int maxfd;
+  uint16_t nread, nwrite, plength;
+  char buffer[BUFSIZE];
+  unsigned long int tap2net = 0, net2tap = 0;
+  struct sockaddr_in udp;
+  struct sockaddr_in udp_remote;
+  int udp_fd;
+
+  /* init UDP */
+  if ((udp_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    perror("UDP: socket()");
+    exit(1);
+  }
+
+  memset(&udp, 0, sizeof(udp));
+  udp.sin_family = AF_INET;
+  udp.sin_addr.s_addr = htonl(INADDR_ANY);
+  udp.sin_port = htons(UDP_PORT);
+
+  memcpy(&udp_remote, &remote, sizeof(remote));
+  udp_remote.sin_port = htons(UDP_PORT);
+
+  if (bind(udp_fd, (struct sockaddr*) &udp, sizeof(udp)) < 0){
+    perror("UDP: bind()");
+    exit(1);
+  }
+  
+  /* use select() to handle two descriptors at once */
+  maxfd = (tap_fd > udp_fd)?tap_fd:udp_fd;
+
+  while(1) {
+    int ret;
+    fd_set rd_set;
+
+    FD_ZERO(&rd_set);
+    FD_SET(tap_fd, &rd_set); FD_SET(udp_fd, &rd_set);
+
+    ret = select(maxfd + 1, &rd_set, NULL, NULL, NULL);
+
+    if (ret < 0 && errno == EINTR){
+      continue;
+    }
+
+    if (ret < 0) {
+      perror("select()");
+      exit(1);
+    }
+
+    if(FD_ISSET(tap_fd, &rd_set)){
+      /* data from tun/tap: just read it and write it to the network */
+      
+      nread = cread(tap_fd, buffer, BUFSIZE);
+
+      tap2net++;
+      do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
+
+      /* send packet */
+      nwrite = sendto(udp_fd, buffer, nread, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
+      do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
+    }
+
+    if(FD_ISSET(udp_fd, &rd_set)){
+      /* data from the network: read it, and write it to the tun/tap interface. 
+       * We need to read the length first, and then the packet */
+
+      struct sockaddr_in frombuf;
+      struct sockaddr *from = (struct sockaddr *) &frombuf;
+      size_t fromlen = sizeof(frombuf);
+
+      net2tap++;
+
+      /* read packet */
+      nread = recvfrom(udp_fd, buffer, BUFSIZE, MSG_DONTWAIT, from, &fromlen);
+      do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
+
+      /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
+      nwrite = cwrite(tap_fd, buffer, nread);
+      do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
+    }
+  }
+}
+
 int main(int argc, char *argv[]) {
   
   int tap_fd, option;
   int flags = IFF_TUN;
   char if_name[IFNAMSIZ] = "";
   int header_len = IP_HDR_LEN;
-  int maxfd;
-  uint16_t nread, nwrite, plength;
 //  uint16_t total_len, ethertype;
-  char buffer[BUFSIZE];
   struct sockaddr_in local, remote;
   char remote_ip[16] = "";
   unsigned short int port = PORT;
   int sock_fd, net_fd, optval = 1;
   socklen_t remotelen;
   int cliserv = -1;    /* must be specified on cmd line */
-  unsigned long int tap2net = 0, net2tap = 0;
+  struct udp_loop_args udp_loop_args;
+  pthread_t udp_thread;
+  char *line;
+  ssize_t bufsize = 0;
 
   progname = argv[0];
   
@@ -317,83 +412,14 @@ int main(int argc, char *argv[]) {
     do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
   }
 
-  /* init UDP */
-  struct sockaddr_in udp;
-  struct sockaddr_in udp_remote;
-  int udp_fd;
+  udp_loop_args.tap_fd = tap_fd;
+  udp_loop_args.remote = remote;
+  pthread_create(&udp_thread, NULL, udp_loop, (void *) &udp_loop_args);
 
-  if ((udp_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-    perror("UDP: socket()");
-    exit(1);
-  }
+  do {
+    printf("> ");
+    getline(&line, &bufsize, stdin);
+  } while (strcmp(line, "exit\n") != 0);
 
-  memset(&udp, 0, sizeof(udp));
-  udp.sin_family = AF_INET;
-  udp.sin_addr.s_addr = htonl(INADDR_ANY);
-  udp.sin_port = htons(UDP_PORT);
-
-  memcpy(&udp_remote, &remote, sizeof(remote));
-  udp_remote.sin_port = htons(UDP_PORT);
-
-  if (bind(udp_fd, (struct sockaddr*) &udp, sizeof(udp)) < 0){
-    perror("UDP: bind()");
-    exit(1);
-  }
-  
-  /* use select() to handle two descriptors at once */
-  maxfd = (tap_fd > net_fd)?tap_fd:net_fd;
-  maxfd = (udp_fd > maxfd)?udp_fd:maxfd;
-
-  while(1) {
-    int ret;
-    fd_set rd_set;
-
-    FD_ZERO(&rd_set);
-    FD_SET(tap_fd, &rd_set); FD_SET(net_fd, &rd_set); FD_SET(udp_fd, &rd_set);
-
-    ret = select(maxfd + 1, &rd_set, NULL, NULL, NULL);
-
-    if (ret < 0 && errno == EINTR){
-      continue;
-    }
-
-    if (ret < 0) {
-      perror("select()");
-      exit(1);
-    }
-
-    if(FD_ISSET(tap_fd, &rd_set)){
-      /* data from tun/tap: just read it and write it to the network */
-      
-      nread = cread(tap_fd, buffer, BUFSIZE);
-
-      tap2net++;
-      do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
-
-      /* send packet */
-      nwrite = sendto(udp_fd, buffer, nread, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
-      do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
-    }
-
-    if(FD_ISSET(udp_fd, &rd_set)){
-      /* data from the network: read it, and write it to the tun/tap interface. 
-       * We need to read the length first, and then the packet */
-
-      struct sockaddr_in frombuf;
-      struct sockaddr *from = (struct sockaddr *) &frombuf;
-      size_t fromlen = sizeof(frombuf);
-
-      net2tap++;
-
-      /* read packet */
-      nread = recvfrom(udp_fd, buffer, BUFSIZE, MSG_DONTWAIT, from, &fromlen);
-      do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
-
-      /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
-      nwrite = cwrite(tap_fd, buffer, nread);
-      do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
-    }
-  }
-  
   return(0);
 }
