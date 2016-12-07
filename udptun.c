@@ -23,6 +23,12 @@
 #include <stdarg.h>
 #include <pthread.h>
 
+#include <openssl/crypto.h>
+#include <openssl/x509.h>
+#include <openssl/pem.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 /* buffer for reading from tun/tap interface, must be >= 1500 */
 #define BUFSIZE 2000
 #define CLIENT 0
@@ -34,6 +40,17 @@
 #define IP_HDR_LEN 20
 #define ETH_HDR_LEN 14
 #define ARP_PKT_LEN 28
+
+#define CHK_NULL(x) if ((x)==NULL) exit (1)
+#define CHK_ERR(err,s) if ((err)==-1) { perror(s); exit(1); }
+#define CHK_SSL(err) if ((err)==-1) { ERR_print_errors_fp(stderr); exit(2); }
+
+/* SSL Certificates and keys */
+#define CERTF_C "client.crt"
+#define KEYF_C "client.key"
+#define CERTF_S "server.crt"
+#define KEYF_S "server.key"
+#define CACERT "ca.crt"
 
 int debug;
 char *progname;
@@ -128,9 +145,9 @@ void do_debug(char *msg, ...){
   va_list argp;
   
   if(debug){
-	va_start(argp, msg);
-	vfprintf(stderr, msg, argp);
-	va_end(argp);
+  va_start(argp, msg);
+  vfprintf(stderr, msg, argp);
+  va_end(argp);
   }
 }
 
@@ -169,11 +186,13 @@ void usage(void) {
 struct udp_loop_args {
   int tap_fd;
   struct sockaddr_in remote;
+  SSL *ssl;
 };
 
 void *udp_loop(void *args) {
   int tap_fd = ((struct udp_loop_args *) args)->tap_fd;
   struct sockaddr_in remote = ((struct udp_loop_args *) args)->remote;
+  SSL *ssl = ((struct udp_loop_args *) args)->ssl;
 
   int maxfd;
   uint16_t nread, nwrite, plength;
@@ -290,6 +309,134 @@ void *ctrl_loop(void *args) {
   }
 }
 
+/**************************************************************************
+ * ssl_init_client: initiate ssl and returns a (SSL *) reference.         *
+ **************************************************************************/
+SSL *ssl_init_client(int net_fd) {
+  SSL_CTX* ctx; int err; 
+  SSL*     ssl;
+  X509*    server_cert;
+  const SSL_METHOD *meth;
+  SSLeay_add_ssl_algorithms();
+  meth = SSLv23_client_method();
+  SSL_load_error_strings();
+  ctx = SSL_CTX_new (meth);   CHK_NULL(ctx);
+  CHK_SSL(err); 
+
+
+  SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,NULL);
+  SSL_CTX_load_verify_locations(ctx,CACERT,NULL);
+
+  if (SSL_CTX_use_certificate_file(ctx, CERTF_C, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(-2);
+  }
+  
+  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF_C, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(-3);
+  }
+
+  if (!SSL_CTX_check_private_key(ctx)) {
+    printf("Private key does not match the certificate public keyn");
+    exit(-4);
+  }
+
+  ssl = SSL_new (ctx);                         CHK_NULL(ssl);    
+  SSL_set_fd (ssl, net_fd);
+  err = SSL_connect (ssl);                     CHK_SSL(err);
+  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
+  server_cert = SSL_get_peer_certificate (ssl);       CHK_NULL(server_cert);
+  printf ("Server certificate:\n");
+  char* str;
+  str = X509_NAME_oneline (X509_get_subject_name (server_cert),0,0);
+  CHK_NULL(str);
+  printf ("\t subject: %s\n", str);
+  OPENSSL_free (str);
+
+  str = X509_NAME_oneline (X509_get_issuer_name  (server_cert),0,0);
+  CHK_NULL(str);
+  printf ("\t issuer: %s\n", str);
+  OPENSSL_free (str);
+
+  X509_free (server_cert);
+
+  return ssl;
+}
+
+/**************************************************************************
+ * ssl_init_server: initiate ssl and returns a (SSL *) reference.         *
+ **************************************************************************/
+SSL *ssl_init_server(int net_fd) {
+  int err;
+  SSL_CTX* ctx;
+  SSL*     ssl; 
+  X509*    client_cert;
+  char*    str;
+  const SSL_METHOD *meth;
+  /* SSL Stuff */
+
+  SSL_load_error_strings();
+  SSLeay_add_ssl_algorithms();
+  meth = SSLv23_server_method();
+  ctx = SSL_CTX_new (meth);
+  if (!ctx) {
+    ERR_print_errors_fp(stderr);
+    exit(2);
+  }
+
+  SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,NULL); /* whether verify the certificate */
+  SSL_CTX_load_verify_locations(ctx,CACERT,NULL);
+  
+  if (SSL_CTX_use_certificate_file(ctx, CERTF_S, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(3);
+  }
+  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF_S, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(4);
+  }
+
+  if (!SSL_CTX_check_private_key(ctx)) {
+    fprintf(stderr,"Private key does not match the certificate public key\n");
+    exit(5);
+  } 
+
+  ssl = SSL_new (ctx);                           CHK_NULL(ssl);
+  SSL_set_fd (ssl, net_fd);
+  err = SSL_accept (ssl);                        CHK_SSL(err);
+  
+  /* Get the cipher - opt */
+  
+  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
+  
+  /* Get client's certificate (note: beware of dynamic allocation) - opt */
+
+  client_cert = SSL_get_peer_certificate (ssl);
+  if (client_cert != NULL) {
+    printf ("Client certificate:\n");
+    
+    str = X509_NAME_oneline (X509_get_subject_name (client_cert), 0, 0);
+    CHK_NULL(str);
+    printf ("\t subject: %s\n", str);
+    OPENSSL_free (str);
+    
+    str = X509_NAME_oneline (X509_get_issuer_name  (client_cert), 0, 0);
+    CHK_NULL(str);
+    printf ("\t issuer: %s\n", str);
+    OPENSSL_free (str);
+    
+    /* We could do all sorts of certificate verification stuff here before
+       deallocating the certificate. */
+    
+    X509_free (client_cert);
+  } else {
+    printf ("Client does not have certificate.\n");
+    exit(1);
+  }
+
+  return ssl;
+}
 
 int main(int argc, char *argv[]) {
   
@@ -309,6 +456,7 @@ int main(int argc, char *argv[]) {
   pthread_t ctrl_thread;
   char *line;
   ssize_t bufsize = 0;
+  SSL *ssl; 
 
   progname = argv[0];
   
@@ -396,6 +544,8 @@ int main(int argc, char *argv[]) {
 
     net_fd = sock_fd;
     do_debug("CLIENT: Connected to server %s\n", inet_ntoa(remote.sin_addr));
+
+    ssl = ssl_init_client(net_fd);
     
   } else {
     /* Server, wait for connections */
@@ -429,11 +579,14 @@ int main(int argc, char *argv[]) {
     }
 
     do_debug("SERVER: Client connected from %s\n", inet_ntoa(remote.sin_addr));
+
+    ssl = ssl_init_server(net_fd);
   }
 
   /* udp */
   udp_loop_args.tap_fd = tap_fd;
   udp_loop_args.remote = remote;
+  udp_loop_args.ssl = ssl;
   pthread_create(&udp_thread, NULL, udp_loop, (void *) &udp_loop_args);
 
   /* ctrl */
