@@ -197,10 +197,18 @@ void *udp_loop(void *args) {
   int maxfd;
   uint16_t nread, nwrite, plength;
   char buffer[BUFSIZE];
+  char outbuf[BUFSIZE];
   unsigned long int tap2net = 0, net2tap = 0;
   struct sockaddr_in udp;
   struct sockaddr_in udp_remote;
   int udp_fd;
+  int rc;
+
+  BIO *for_reading = BIO_new(BIO_s_mem());
+  BIO *for_writing = BIO_new(BIO_s_mem());
+  BIO_set_mem_eof_return(for_reading, -1);
+  BIO_set_mem_eof_return(for_writing, -1);
+  SSL_set_bio(ssl, for_reading, for_writing);
 
   /* init UDP */
   if ((udp_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -244,14 +252,22 @@ void *udp_loop(void *args) {
 
     if(FD_ISSET(tap_fd, &rd_set)){
       /* data from tun/tap: just read it and write it to the network */
-      
-      nread = cread(tap_fd, buffer, BUFSIZE);
 
       tap2net++;
+
+      nread = cread(tap_fd, buffer, BUFSIZE);
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
+      /* call OpenSSL to write out our buffer of data. */
+      /* reminder: this actually writes it out to a memory bio */
+      rc = SSL_write(ssl, buffer, nread);
+      do_debug("TAP2NET %lu: SSL_write(): %d\n", tap2net, rc);
+      /* Read the actual packet to be sent out of the for_writing bio */
+      rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
+      do_debug("TAP2NET %lu: BIO_read(): %d\n", tap2net, rc);
+
       /* send packet */
-      nwrite = sendto(udp_fd, buffer, nread, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
+      nwrite = sendto(udp_fd, outbuf, rc, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
       do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
 
@@ -269,8 +285,16 @@ void *udp_loop(void *args) {
       nread = recvfrom(udp_fd, buffer, BUFSIZE, MSG_DONTWAIT, from, &fromlen);
       do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 
+      /* write the received buffer from the UDP socket to the memory-based input bio */
+      rc = BIO_write(for_reading, buffer, nread);
+      do_debug("NET2TAP %lu: BIO_write(): %d\n", tap2net, rc);
+      /* Tell openssl to process the packet now stored in the memory bio */
+      rc = SSL_read(ssl, buffer, BUFSIZE);
+      do_debug("NET2TAP %lu: SSL_read(): %d\n", tap2net, rc);
+      /* at this point buf will store the results (with a length of rc) */
+
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
-      nwrite = cwrite(tap_fd, buffer, nread);
+      nwrite = cwrite(tap_fd, buffer, rc);
       do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
     }
   }
