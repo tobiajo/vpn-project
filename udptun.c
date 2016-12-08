@@ -467,11 +467,13 @@ void *ctrl_loop(void *args) {
     }
 
     if (FD_ISSET(ctrl_fd_r, &rd_set)) {
+      /* cmdline -> net (just for demo) */
       cread(ctrl_fd_r, buffer, BUFSIZE);
       cwrite(net_fd, buffer, BUFSIZE);
     }
 
     if (FD_ISSET(net_fd, &rd_set)) {
+      /* net -> stdout */
       read_n(net_fd, buffer, BUFSIZE);
       printf("incoming msg: %s", buffer);
     }
