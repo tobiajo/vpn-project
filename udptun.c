@@ -181,6 +181,135 @@ void usage(void) {
 }
 
 /**************************************************************************
+ * ssl_init_client: initiate ssl and returns a (SSL *) reference.         *
+ **************************************************************************/
+SSL *ssl_init_client(int net_fd) {
+  SSL_CTX* ctx; int err; 
+  SSL*     ssl;
+  X509*    server_cert;
+  const SSL_METHOD *meth;
+  SSLeay_add_ssl_algorithms();
+  meth = SSLv23_client_method();
+  SSL_load_error_strings();
+  ctx = SSL_CTX_new (meth);   CHK_NULL(ctx);
+  CHK_SSL(err); 
+
+
+  SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,NULL);
+  SSL_CTX_load_verify_locations(ctx,CACERT,NULL);
+
+  if (SSL_CTX_use_certificate_file(ctx, CERTF_C, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(-2);
+  }
+  
+  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF_C, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(-3);
+  }
+
+  if (!SSL_CTX_check_private_key(ctx)) {
+    printf("Private key does not match the certificate public keyn");
+    exit(-4);
+  }
+
+  ssl = SSL_new (ctx);                         CHK_NULL(ssl);    
+  SSL_set_fd (ssl, net_fd);
+  err = SSL_connect (ssl);                     CHK_SSL(err);
+  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
+  server_cert = SSL_get_peer_certificate (ssl);       CHK_NULL(server_cert);
+  printf ("Server certificate:\n");
+  char* str;
+  str = X509_NAME_oneline (X509_get_subject_name (server_cert),0,0);
+  CHK_NULL(str);
+  printf ("\t subject: %s\n", str);
+  OPENSSL_free (str);
+
+  str = X509_NAME_oneline (X509_get_issuer_name  (server_cert),0,0);
+  CHK_NULL(str);
+  printf ("\t issuer: %s\n", str);
+  OPENSSL_free (str);
+
+  X509_free (server_cert);
+
+  return ssl;
+}
+
+/**************************************************************************
+ * ssl_init_server: initiate ssl and returns a (SSL *) reference.         *
+ **************************************************************************/
+SSL *ssl_init_server(int net_fd) {
+  int err;
+  SSL_CTX* ctx;
+  SSL*     ssl; 
+  X509*    client_cert;
+  char*    str;
+  const SSL_METHOD *meth;
+  /* SSL Stuff */
+
+  SSL_load_error_strings();
+  SSLeay_add_ssl_algorithms();
+  meth = SSLv23_server_method();
+  ctx = SSL_CTX_new (meth);
+  if (!ctx) {
+    ERR_print_errors_fp(stderr);
+    exit(2);
+  }
+
+  SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,NULL); /* whether verify the certificate */
+  SSL_CTX_load_verify_locations(ctx,CACERT,NULL);
+  
+  if (SSL_CTX_use_certificate_file(ctx, CERTF_S, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(3);
+  }
+  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF_S, SSL_FILETYPE_PEM) <= 0) {
+    ERR_print_errors_fp(stderr);
+    exit(4);
+  }
+
+  if (!SSL_CTX_check_private_key(ctx)) {
+    fprintf(stderr,"Private key does not match the certificate public key\n");
+    exit(5);
+  } 
+
+  ssl = SSL_new (ctx);                           CHK_NULL(ssl);
+  SSL_set_fd (ssl, net_fd);
+  err = SSL_accept (ssl);                        CHK_SSL(err);
+  
+  /* Get the cipher - opt */
+  
+  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
+  
+  /* Get client's certificate (note: beware of dynamic allocation) - opt */
+
+  client_cert = SSL_get_peer_certificate (ssl);
+  if (client_cert != NULL) {
+    printf ("Client certificate:\n");
+    
+    str = X509_NAME_oneline (X509_get_subject_name (client_cert), 0, 0);
+    CHK_NULL(str);
+    printf ("\t subject: %s\n", str);
+    OPENSSL_free (str);
+    
+    str = X509_NAME_oneline (X509_get_issuer_name  (client_cert), 0, 0);
+    CHK_NULL(str);
+    printf ("\t issuer: %s\n", str);
+    OPENSSL_free (str);
+    
+    /* We could do all sorts of certificate verification stuff here before
+       deallocating the certificate. */
+    
+    X509_free (client_cert);
+  } else {
+    printf ("Client does not have certificate.\n");
+    exit(1);
+  }
+
+  return ssl;
+}
+
+/**************************************************************************
  * udp_loop: handles the udp tunnel.                                      *
  **************************************************************************/
 struct udp_loop_args {
@@ -347,135 +476,6 @@ void *ctrl_loop(void *args) {
       printf("incoming msg: %s", buffer);
     }
   }
-}
-
-/**************************************************************************
- * ssl_init_client: initiate ssl and returns a (SSL *) reference.         *
- **************************************************************************/
-SSL *ssl_init_client(int net_fd) {
-  SSL_CTX* ctx; int err; 
-  SSL*     ssl;
-  X509*    server_cert;
-  const SSL_METHOD *meth;
-  SSLeay_add_ssl_algorithms();
-  meth = SSLv23_client_method();
-  SSL_load_error_strings();
-  ctx = SSL_CTX_new (meth);   CHK_NULL(ctx);
-  CHK_SSL(err); 
-
-
-  SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,NULL);
-  SSL_CTX_load_verify_locations(ctx,CACERT,NULL);
-
-  if (SSL_CTX_use_certificate_file(ctx, CERTF_C, SSL_FILETYPE_PEM) <= 0) {
-    ERR_print_errors_fp(stderr);
-    exit(-2);
-  }
-  
-  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF_C, SSL_FILETYPE_PEM) <= 0) {
-    ERR_print_errors_fp(stderr);
-    exit(-3);
-  }
-
-  if (!SSL_CTX_check_private_key(ctx)) {
-    printf("Private key does not match the certificate public keyn");
-    exit(-4);
-  }
-
-  ssl = SSL_new (ctx);                         CHK_NULL(ssl);    
-  SSL_set_fd (ssl, net_fd);
-  err = SSL_connect (ssl);                     CHK_SSL(err);
-  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
-  server_cert = SSL_get_peer_certificate (ssl);       CHK_NULL(server_cert);
-  printf ("Server certificate:\n");
-  char* str;
-  str = X509_NAME_oneline (X509_get_subject_name (server_cert),0,0);
-  CHK_NULL(str);
-  printf ("\t subject: %s\n", str);
-  OPENSSL_free (str);
-
-  str = X509_NAME_oneline (X509_get_issuer_name  (server_cert),0,0);
-  CHK_NULL(str);
-  printf ("\t issuer: %s\n", str);
-  OPENSSL_free (str);
-
-  X509_free (server_cert);
-
-  return ssl;
-}
-
-/**************************************************************************
- * ssl_init_server: initiate ssl and returns a (SSL *) reference.         *
- **************************************************************************/
-SSL *ssl_init_server(int net_fd) {
-  int err;
-  SSL_CTX* ctx;
-  SSL*     ssl; 
-  X509*    client_cert;
-  char*    str;
-  const SSL_METHOD *meth;
-  /* SSL Stuff */
-
-  SSL_load_error_strings();
-  SSLeay_add_ssl_algorithms();
-  meth = SSLv23_server_method();
-  ctx = SSL_CTX_new (meth);
-  if (!ctx) {
-    ERR_print_errors_fp(stderr);
-    exit(2);
-  }
-
-  SSL_CTX_set_verify(ctx,SSL_VERIFY_PEER,NULL); /* whether verify the certificate */
-  SSL_CTX_load_verify_locations(ctx,CACERT,NULL);
-  
-  if (SSL_CTX_use_certificate_file(ctx, CERTF_S, SSL_FILETYPE_PEM) <= 0) {
-    ERR_print_errors_fp(stderr);
-    exit(3);
-  }
-  if (SSL_CTX_use_PrivateKey_file(ctx, KEYF_S, SSL_FILETYPE_PEM) <= 0) {
-    ERR_print_errors_fp(stderr);
-    exit(4);
-  }
-
-  if (!SSL_CTX_check_private_key(ctx)) {
-    fprintf(stderr,"Private key does not match the certificate public key\n");
-    exit(5);
-  } 
-
-  ssl = SSL_new (ctx);                           CHK_NULL(ssl);
-  SSL_set_fd (ssl, net_fd);
-  err = SSL_accept (ssl);                        CHK_SSL(err);
-  
-  /* Get the cipher - opt */
-  
-  printf ("SSL connection using %s\n", SSL_get_cipher (ssl));
-  
-  /* Get client's certificate (note: beware of dynamic allocation) - opt */
-
-  client_cert = SSL_get_peer_certificate (ssl);
-  if (client_cert != NULL) {
-    printf ("Client certificate:\n");
-    
-    str = X509_NAME_oneline (X509_get_subject_name (client_cert), 0, 0);
-    CHK_NULL(str);
-    printf ("\t subject: %s\n", str);
-    OPENSSL_free (str);
-    
-    str = X509_NAME_oneline (X509_get_issuer_name  (client_cert), 0, 0);
-    CHK_NULL(str);
-    printf ("\t issuer: %s\n", str);
-    OPENSSL_free (str);
-    
-    /* We could do all sorts of certificate verification stuff here before
-       deallocating the certificate. */
-    
-    X509_free (client_cert);
-  } else {
-    printf ("Client does not have certificate.\n");
-    exit(1);
-  }
-
-  return ssl;
 }
 
 int main(int argc, char *argv[]) {
