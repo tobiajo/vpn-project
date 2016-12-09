@@ -1,5 +1,5 @@
 /**************************************************************************
- * udptun.c                                                               *
+ * udptun2.c                                                              *
  *                                                                        *
  * Derived from:                                                          *
  *   http://www.cis.syr.edu/~wedu/seed/Labs/VPN/files/simpletun.c         *
