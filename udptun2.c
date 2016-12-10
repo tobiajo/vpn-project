@@ -668,7 +668,7 @@ void *udp_loop(void *args) {
 
       nread = cread(tap_fd, buffer, BUFSIZE);
       plength = nread;
-      do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
+      do_debug("TAP2UDP %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* sign */
       sign_it(buffer, plength, &sig, &slen, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key, key_len));
@@ -679,7 +679,7 @@ void *udp_loop(void *args) {
 
       /* send packet */
       nwrite = sendto(udp_fd, ciphertext, rc, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
-      do_debug("TAP2NET %lu: Written %d bytes to the network\n", tap2net, nwrite);
+      do_debug("TAP2UDP %lu: Written %d bytes to the network\n", tap2net, nwrite);
     }
 
     if(FD_ISSET(udp_fd, &rd_set)){
@@ -690,7 +690,7 @@ void *udp_loop(void *args) {
 
       /* read packet */
       nread = recvfrom(udp_fd, buffer, BUFSIZE, MSG_DONTWAIT, from, &fromlen);
-      do_debug("NET2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
+      do_debug("UDP2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 
       /* decrypt */
       rc = decrypt(buffer, nread, key, iv, plaintext);
@@ -700,7 +700,7 @@ void *udp_loop(void *args) {
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
       nwrite = cwrite(tap_fd, plaintext, plength);
-      do_debug("NET2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
+      do_debug("UDP2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
     }
   }
 }
@@ -722,6 +722,15 @@ void *ctrl_loop(void *args) {
   char buffer[BUFSIZE];
   int maxfd;
   uint16_t nread, nwrite, plength;
+  unsigned long int cmd2net = 0, net2cmd = 0;
+  int rc;
+  char outbuf[BUFSIZE];
+
+  BIO *for_reading = BIO_new(BIO_s_mem());
+  BIO *for_writing = BIO_new(BIO_s_mem());
+  BIO_set_mem_eof_return(for_reading, -1);
+  BIO_set_mem_eof_return(for_writing, -1);
+  SSL_set_bio(ssl, for_reading, for_writing);
 
   maxfd = (ctrl_fd_r > net_fd)?ctrl_fd_r:net_fd;
   
@@ -744,21 +753,69 @@ void *ctrl_loop(void *args) {
     }
 
     if (FD_ISSET(ctrl_fd_r, &rd_set)) {
-      /* cmdline -> net (just for demo) */
-      cread(ctrl_fd_r, buffer, BUFSIZE);
-      cwrite(net_fd, buffer, BUFSIZE);
+      /* data from cmd prompt */
+
+      cmd2net++;
+
+      nread = cread(ctrl_fd_r, buffer, BUFSIZE);
+      do_debug("CMD2TCP %lu: Read %d bytes from the cmd prompt\n", cmd2net, nread);
+
+      do {
+        buffer[nread] = '\0';
+        if (strcmp(buffer, "change key\n") == 0) {
+          do_debug("from cmd: change key\n");
+        } else if (strcmp(buffer, "change iv\n") == 0) {
+          do_debug("from cmd: change iv\n");
+        } else if(strcmp(buffer, "break tunnel\n") == 0) {
+          do_debug("from cmd: break tunnel\n");
+        } else {
+          printf("from cmd: invalid command!\n");
+          break;
+        }
+
+        /* call OpenSSL to write out our buffer of data. */
+        /* reminder: this actually writes it out to a memory bio */
+        rc = SSL_write(ssl, buffer, nread);
+        /* Read the actual packet to be sent out of the for_writing bio */
+        rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
+
+        nwrite = send(net_fd, outbuf, rc, 0);
+        do_debug("CMD2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);  
+      } while(0);
     }
 
     if (FD_ISSET(net_fd, &rd_set)) {
-      /* net -> stdout */
-      read_n(net_fd, buffer, BUFSIZE);
-      printf("incoming msg: %s", buffer);
+      /* data from the network */
+
+      net2cmd++;
+
+      nread = recv(net_fd, buffer, BUFSIZE, MSG_DONTWAIT);
+      do_debug("TCP2CMD %lu: Read %d bytes from the network\n", net2cmd, nread);
+
+      /* write the received buffer from the UDP socket to the memory-based input bio */
+      rc = BIO_write(for_reading, buffer, nread);
+      /* Tell openssl to process the packet now stored in the memory bio */
+      rc = SSL_read(ssl, buffer, BUFSIZE);
+      /* at this point buf will store the results (with a length of rc) */
+      do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
+
+      buffer[rc] = '\0';
+      if (strcmp(buffer, "change key\n") == 0) {
+        do_debug("from client: change key\n");
+      } else if (strcmp(buffer, "change iv\n") == 0) {
+        do_debug("from client: change iv\n");
+      } else if(strcmp(buffer, "break tunnel\n") == 0) {
+        do_debug("from client: break tunnel\n");
+      } else {
+        printf("from client: invalid command!\n");
+        break;
+      }
     }
   }
 }
 
-int main(int argc, char *argv[]) {
-  
+
+int main(int argc, char *argv[]) {  
   int tap_fd, option;
   int flags = IFF_TUN;
   char if_name[IFNAMSIZ] = "";
@@ -776,7 +833,7 @@ int main(int argc, char *argv[]) {
   pthread_t ctrl_thread;
   char *line;
   ssize_t bufsize = 0;
-  SSL *ssl; 
+  SSL *ssl;
 
   progname = argv[0];
   
@@ -917,13 +974,15 @@ int main(int argc, char *argv[]) {
   ctrl_loop_args.ctrl_fd_r = ctrl_fd_r;
   ctrl_loop_args.net_fd = net_fd;
   ctrl_loop_args.ssl = ssl;
-  //pthread_create(&ctrl_thread, NULL, &ctrl_loop, (void *) &ctrl_loop_args);
+  pthread_create(&ctrl_thread, NULL, &ctrl_loop, (void *) &ctrl_loop_args);
 
   /* cmd prompt */
   do {
     printf("> ");
     int line_len = getline(&line, &bufsize, stdin);
-    cwrite(ctrl_fd_w, line, line_len);
+    if (cliserv==CLIENT) {
+      cwrite(ctrl_fd_w, line, line_len);
+    }
   } while (strcmp(line, "exit\n") != 0);
 
   return(0);
