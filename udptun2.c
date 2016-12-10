@@ -56,8 +56,16 @@ const char hn[] = "SHA256";
 #define KEYF_S "server.key"
 #define CACERT "ca.crt"
 
+
 int debug;
 char *progname;
+
+/* udp tunnel */
+const size_t udp_key_len = 32;
+const size_t udp_iv_len  = 16;
+byte *udp_key = (byte *) "01234567890123456789012345678901";
+byte *udp_iv  = (byte *) "0123456789012345";
+int udp_negotiation = 0;
 
 /**************************************************************************
  * tun_alloc: allocates or reconnects to a tun/tap device. The caller     *
@@ -613,13 +621,9 @@ void *udp_loop(void *args) {
   byte ciphertext[BUFSIZE];
   byte plaintext[BUFSIZE];
 
-  /* 256 bit key and 128 bit IV */
-  const size_t key_len = 32;
   const size_t sig_len = 32;
-  const size_t iv_len  = 16;
-  byte *key = (byte *) "01234567890123456789012345678901";
-  byte *sig = NULL; size_t slen = 0;
-  byte *iv  = (byte *) "0123456789012345";
+  byte *sig = NULL;
+  size_t slen = 0;
 
   /* init UDP */
   if ((udp_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -661,7 +665,7 @@ void *udp_loop(void *args) {
       exit(1);
     }
 
-    if(FD_ISSET(tap_fd, &rd_set)){
+    if(FD_ISSET(tap_fd, &rd_set) && !udp_negotiation){
       /* data from tun/tap: just read it and write it to the network */
 
       tap2net++;
@@ -671,11 +675,11 @@ void *udp_loop(void *args) {
       do_debug("TAP2UDP %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* sign */
-      sign_it(buffer, plength, &sig, &slen, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key, key_len));
+      sign_it(buffer, plength, &sig, &slen, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, udp_key, udp_key_len));
       assert(slen==sig_len);
       memcpy(buffer+plength, sig, sig_len);
       /* encrypt */
-      rc = encrypt(buffer, plength+sig_len, key, iv, ciphertext);
+      rc = encrypt(buffer, plength+sig_len, udp_key, udp_iv, ciphertext);
 
       /* send packet */
       nwrite = sendto(udp_fd, ciphertext, rc, 0, (struct sockaddr *) &udp_remote, sizeof(struct sockaddr));
@@ -693,10 +697,10 @@ void *udp_loop(void *args) {
       do_debug("UDP2TAP %lu: Read %d bytes from the network\n", net2tap, nread);
 
       /* decrypt */
-      rc = decrypt(buffer, nread, key, iv, plaintext);
+      rc = decrypt(buffer, nread, udp_key, udp_iv, plaintext);
       plength = rc-sig_len;
       /* verify */
-      verify_it(plaintext, plength, plaintext+plength, sig_len, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key, key_len));
+      verify_it(plaintext, plength, plaintext+plength, sig_len, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, udp_key, udp_key_len));
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
       nwrite = cwrite(tap_fd, plaintext, plength);
@@ -761,13 +765,28 @@ void *ctrl_loop(void *args) {
       do_debug("CMD2TCP %lu: Read %d bytes from the cmd prompt\n", cmd2net, nread);
 
       do {
-        buffer[nread] = '\0';
         if (strcmp(buffer, "change key\n") == 0) {
           do_debug("from cmd: change key\n");
+          udp_negotiation=1;
+
+          /* TODO: generate new key, send to server */
+
+          // maybe send: 'k'+[new key]
+
         } else if (strcmp(buffer, "change iv\n") == 0) {
           do_debug("from cmd: change iv\n");
+          udp_negotiation=1;
+
+          /* TODO: generate new iv, send to server */
+
+          // maybe send: 'i'+[new iv]
+
         } else if(strcmp(buffer, "break tunnel\n") == 0) {
           do_debug("from cmd: break tunnel\n");
+          udp_negotiation=1;
+
+          /* TODO: solve this problem */
+
         } else {
           printf("from cmd: invalid command!\n");
           break;
@@ -799,13 +818,25 @@ void *ctrl_loop(void *args) {
       /* at this point buf will store the results (with a length of rc) */
       do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
 
-      buffer[rc] = '\0';
-      if (strcmp(buffer, "change key\n") == 0) {
+      if (buffer[0] == 'k') {
         do_debug("from client: change key\n");
-      } else if (strcmp(buffer, "change iv\n") == 0) {
+        udp_negotiation=1;
+
+        /* TODO: some stuff. what handshake protocol should we use? */
+
+      } else if (buffer[0] == 'i') {
         do_debug("from client: change iv\n");
-      } else if(strcmp(buffer, "break tunnel\n") == 0) {
+        udp_negotiation=1;
+
+        /* TODO: some stuff. what handshake protocol should we use? */
+
+
+      } else if(buffer[0] == 'v') {
         do_debug("from client: break tunnel\n");
+        udp_negotiation=1;
+
+        /* TODO: some stuff. what handshake protocol should we use? */
+
       } else {
         printf("from client: invalid command!\n");
         break;
