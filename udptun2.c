@@ -725,7 +725,7 @@ void *ctrl_loop(void *args) {
 
   char buffer[BUFSIZE];
   int maxfd;
-  uint16_t nread, nwrite, plength;
+  uint16_t nread, nwrite, plength, buffer_len;
   unsigned long int cmd2net = 0, net2cmd = 0;
   int rc;
   char outbuf[BUFSIZE];
@@ -768,6 +768,8 @@ void *ctrl_loop(void *args) {
         if (strcmp(buffer, "change key\n") == 0) {
           do_debug("from cmd: change key\n");
           udp_negotiation=1;
+          buffer[0] = 'k';
+          buffer_len = 1;
 
           /* TODO: generate new key, send to server */
 
@@ -776,6 +778,8 @@ void *ctrl_loop(void *args) {
         } else if (strcmp(buffer, "change iv\n") == 0) {
           do_debug("from cmd: change iv\n");
           udp_negotiation=1;
+          buffer[0] = 'i';
+          buffer_len = 1;
 
           /* TODO: generate new iv, send to server */
 
@@ -784,6 +788,8 @@ void *ctrl_loop(void *args) {
         } else if(strcmp(buffer, "break tunnel\n") == 0) {
           do_debug("from cmd: break tunnel\n");
           udp_negotiation=1;
+          buffer[0] = 'b';
+          buffer_len = 1;
 
           /* TODO: solve this problem */
 
@@ -794,7 +800,7 @@ void *ctrl_loop(void *args) {
 
         /* call OpenSSL to write out our buffer of data. */
         /* reminder: this actually writes it out to a memory bio */
-        rc = SSL_write(ssl, buffer, nread);
+        rc = SSL_write(ssl, buffer, buffer_len);
         /* Read the actual packet to be sent out of the for_writing bio */
         rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
 
@@ -831,7 +837,7 @@ void *ctrl_loop(void *args) {
         /* TODO: some stuff. what handshake protocol should we use? */
 
 
-      } else if(buffer[0] == 'v') {
+      } else if(buffer[0] == 'b') {
         do_debug("from client: break tunnel\n");
         udp_negotiation=1;
 
