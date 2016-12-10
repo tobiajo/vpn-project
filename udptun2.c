@@ -834,6 +834,9 @@ int main(int argc, char *argv[]) {
   char *line;
   ssize_t bufsize = 0;
   SSL *ssl;
+  char *ctrl_pipe;
+  int ctrl_fd_r;
+  int ctrl_fd_w;
 
   progname = argv[0];
   
@@ -967,10 +970,10 @@ int main(int argc, char *argv[]) {
   pthread_create(&udp_thread, NULL, udp_loop, (void *) &udp_loop_args);
 
   /* ctrl */
-  char ctrl_pipe[] = "/tmp/ctrlpipe";
+  ctrl_pipe = strdup("/tmp/ctrlpipe");
   mkfifo(ctrl_pipe, 0666);
-  int ctrl_fd_r = open(ctrl_pipe, O_RDONLY|O_NONBLOCK);
-  int ctrl_fd_w = open(ctrl_pipe, O_WRONLY|O_NONBLOCK);
+  ctrl_fd_r = open(ctrl_pipe, O_RDONLY|O_NONBLOCK);
+  ctrl_fd_w = open(ctrl_pipe, O_WRONLY|O_NONBLOCK);
   ctrl_loop_args.ctrl_fd_r = ctrl_fd_r;
   ctrl_loop_args.net_fd = net_fd;
   ctrl_loop_args.ssl = ssl;
