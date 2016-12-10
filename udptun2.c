@@ -610,14 +610,16 @@ void *udp_loop(void *args) {
   size_t fromlen = sizeof(frombuf);
   int rc;
 
-  unsigned char *key = (unsigned char *)"01234567890123456789012345678901";
-  unsigned char *iv = (unsigned char *)"01234567890123456";
-  unsigned char ciphertext[BUFSIZE];
-  unsigned char plaintext[BUFSIZE];
+  byte ciphertext[BUFSIZE];
+  byte plaintext[BUFSIZE];
 
-  byte* sig = NULL;
+  /* 256 bit key and 128 bit IV */
+  const size_t key_len = 32;
   const size_t sig_len = 32;
-  size_t slen = 0;
+  const size_t iv_len  = 16;
+  byte *key = (byte *) "01234567890123456789012345678901";
+  byte *sig = NULL; size_t slen = 0;
+  byte *iv  = (byte *) "0123456789012345";
 
   /* init UDP */
   if ((udp_fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -669,7 +671,7 @@ void *udp_loop(void *args) {
       do_debug("TAP2NET %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* sign */
-      sign_it(buffer, plength, &sig, &slen, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key, sizeof(key)));
+      sign_it(buffer, plength, &sig, &slen, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key, key_len));
       assert(slen==sig_len);
       memcpy(buffer+plength, sig, sig_len);
       /* encrypt */
@@ -694,7 +696,7 @@ void *udp_loop(void *args) {
       rc = decrypt(buffer, nread, key, iv, plaintext);
       plength = rc-sig_len;
       /* verify */
-      verify_it(plaintext, plength, plaintext+plength, sig_len, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key, sizeof(key)));
+      verify_it(plaintext, plength, plaintext+plength, sig_len, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, key, key_len));
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
       nwrite = cwrite(tap_fd, plaintext, plength);
