@@ -851,7 +851,7 @@ void *ctrl_loop_client(void *args) {
         do_debug("from server: ACCEPT initial key and iv\n");
         udp_negotiation=0;
       }
-      if (buffer[0] == 'l') {
+      else if (buffer[0] == 'l') {
         do_debug("from server: ACCEPT change key\n");
         udp_negotiation=0;
       } else if (buffer[0] == 'j') {
@@ -935,7 +935,7 @@ void *ctrl_loop_server(void *args) {
         rc = SSL_write(ssl, buffer2, buffer2_len);
         rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
         nwrite = send(net_fd, outbuf, rc, 0);
-        do_debug("TCP2CMD %lu: Written %d bytes to the network\n", cmd2net, nwrite);
+        do_debug("TCP2CMD %lu: Written %d bytes to the network\n", net2cmd, nwrite);
       }
       else if (buffer[0] == 'k') {
         do_debug("from client: change key\n");
