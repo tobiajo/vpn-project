@@ -63,7 +63,7 @@ char *progname;
 /* udp tunnel */
 byte udp_key[32];
 byte udp_iv[16];
-int udp_negotiation = 0;
+int udp_negotiation = 1;
 
 /**************************************************************************
  * tun_alloc: allocates or reconnects to a tun/tap device. The caller     *
@@ -735,6 +735,24 @@ void *ctrl_loop_client(void *args) {
   BIO_set_mem_eof_return(for_writing, -1);
   SSL_set_bio(ssl, for_reading, for_writing);
 
+  // 'a'+[initial key]+[initial iv]
+  buffer[0] = 'a';
+  buffer_len++;
+  //RAND_bytes(udp_key, sizeof(udp_key));
+  for (i=0; i<sizeof(udp_key); i++) {
+    buffer[buffer_len] = udp_key[i];
+    buffer_len++;
+  }
+  //RAND_bytes(udp_iv, sizeof(udp_iv));
+  for (i=0; i<sizeof(udp_iv); i++) {
+    buffer[buffer_len] = udp_iv[i];
+    buffer_len++;
+  }
+  rc = SSL_write(ssl, buffer, buffer_len);
+  rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
+  //nwrite = send(net_fd, outbuf, rc, 0);
+  //do_debug("INIT2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);
+
   maxfd = (ctrl_fd_r > net_fd)?ctrl_fd_r:net_fd;
   
   while(1) {
@@ -771,11 +789,11 @@ void *ctrl_loop_client(void *args) {
           buffer[0] = 'k';
           buffer_len = 1;
 
-          // 'k'+[new iv]
+          // 'k'+[new key]
           RAND_bytes(udp_key, sizeof(udp_key));
           do_debug("new key: %s\n", udp_key);
           for (i=0; i<sizeof(udp_key); i++) {
-            buffer[i+1] = udp_key[i];
+            buffer[buffer_len] = udp_key[i];
             buffer_len++;
           }
 
@@ -789,7 +807,7 @@ void *ctrl_loop_client(void *args) {
           RAND_bytes(udp_iv, sizeof(udp_iv));
           do_debug("new iv: %s\n", udp_iv);
           for (i=0; i<sizeof(udp_iv); i++) {
-            buffer[i+1] = udp_iv[i];
+            buffer[buffer_len] = udp_iv[i];
             buffer_len++;
           }
 
@@ -813,7 +831,7 @@ void *ctrl_loop_client(void *args) {
         rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
 
         nwrite = send(net_fd, outbuf, rc, 0);
-        do_debug("CMD2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);  
+        do_debug("CMD2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);
       } while(0);
     }
 
@@ -832,6 +850,10 @@ void *ctrl_loop_client(void *args) {
       /* at this point buf will store the results (with a length of rc) */
       do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
 
+      if (buffer[0] == 'b') {
+        do_debug("from server: ACCEPT initial key and iv\n");
+        udp_negotiation=0;
+      }
       if (buffer[0] == 'l') {
         do_debug("from server: ACCEPT change key\n");
         udp_negotiation=0;
@@ -900,12 +922,27 @@ void *ctrl_loop_server(void *args) {
       /* at this point buf will store the results (with a length of rc) */
       do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
 
-      if (buffer[0] == 'k') {
+      if (buffer[0] == 'a') {
+        do_debug("from client: initial key and iv\n");
+        for (i=0; i<sizeof(udp_key); i++) {
+          udp_key[i] = buffer[i+1];
+        }
+        for (i=0; i<sizeof(udp_iv); i++) {
+          udp_iv[i] = buffer[i+1+sizeof(udp_key)];
+        }
+        udp_negotiation = 0;
+
+        buffer[0] = 'b';
+        rc = SSL_write(ssl, buffer, 1);
+        rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
+        nwrite = send(net_fd, outbuf, rc, 0);
+        do_debug("TCP2CMD %lu: Written %d bytes to the network\n", cmd2net, nwrite); 
+      }
+      else if (buffer[0] == 'k') {
         do_debug("from client: change key\n");
         for (i=0; i<sizeof(udp_key); i++) {
           udp_key[i] = buffer[i+1];
         }
-        do_debug("new key: %s\n", udp_key);
 
         buffer[0] = 'l';
         rc = SSL_write(ssl, buffer, 1);
@@ -918,7 +955,6 @@ void *ctrl_loop_server(void *args) {
         for (i=0; i<sizeof(udp_iv); i++) {
           udp_iv[i] = buffer[i+1];
         }
-        do_debug("new iv: %s\n", udp_iv);
 
         buffer[0] = 'j';
         rc = SSL_write(ssl, buffer, 1);
