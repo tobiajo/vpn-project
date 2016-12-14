@@ -716,7 +716,7 @@ struct ctrl_loop_args {
   SSL *ssl;
 };
 
-void *ctrl_loop(void *args) {
+void *ctrl_loop_client(void *args) {
   int ctrl_fd_r = ((struct ctrl_loop_args *) args)->ctrl_fd_r;
   int net_fd = ((struct ctrl_loop_args *) args)->net_fd;
   SSL *ssl = ((struct ctrl_loop_args *) args)->ssl;
@@ -815,6 +815,63 @@ void *ctrl_loop(void *args) {
         nwrite = send(net_fd, outbuf, rc, 0);
         do_debug("CMD2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);  
       } while(0);
+    }
+
+    if (FD_ISSET(net_fd, &rd_set)) {
+      /* data from the network */
+
+      net2cmd++;
+
+      nread = recv(net_fd, buffer, BUFSIZE, MSG_DONTWAIT);
+      do_debug("TCP2CMD %lu: Read %d bytes from the network\n", net2cmd, nread);
+
+      /* write the received buffer from the UDP socket to the memory-based input bio */
+      rc = BIO_write(for_reading, buffer, nread);
+      /* Tell openssl to process the packet now stored in the memory bio */
+      rc = SSL_read(ssl, buffer, BUFSIZE);
+      /* at this point buf will store the results (with a length of rc) */
+      do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
+    }
+  }
+}
+
+void *ctrl_loop_server(void *args) {
+  int ctrl_fd_r = ((struct ctrl_loop_args *) args)->ctrl_fd_r;
+  int net_fd = ((struct ctrl_loop_args *) args)->net_fd;
+  SSL *ssl = ((struct ctrl_loop_args *) args)->ssl;
+
+  char buffer[BUFSIZE];
+  int maxfd;
+  uint16_t nread, nwrite, plength, buffer_len;
+  unsigned long int cmd2net = 0, net2cmd = 0;
+  int rc;
+  char outbuf[BUFSIZE];
+  int i;
+
+  BIO *for_reading = BIO_new(BIO_s_mem());
+  BIO *for_writing = BIO_new(BIO_s_mem());
+  BIO_set_mem_eof_return(for_reading, -1);
+  BIO_set_mem_eof_return(for_writing, -1);
+  SSL_set_bio(ssl, for_reading, for_writing);
+
+  maxfd = (ctrl_fd_r > net_fd)?ctrl_fd_r:net_fd;
+  
+  while(1) {
+    int ret;
+    fd_set rd_set;
+
+    FD_ZERO(&rd_set);
+    FD_SET(ctrl_fd_r, &rd_set); FD_SET(net_fd, &rd_set);
+
+    ret = select(maxfd+1, &rd_set, NULL, NULL, NULL);
+
+    if (ret < 0 && errno == EINTR){
+      continue;
+    }
+
+    if (ret < 0) {
+      perror("select()");
+      exit(1);
     }
 
     if (FD_ISSET(net_fd, &rd_set)) {
@@ -1030,7 +1087,11 @@ int main(int argc, char *argv[]) {
   ctrl_loop_args.ctrl_fd_r = ctrl_fd_r;
   ctrl_loop_args.net_fd = net_fd;
   ctrl_loop_args.ssl = ssl;
-  pthread_create(&ctrl_thread, NULL, &ctrl_loop, (void *) &ctrl_loop_args);
+  if (cliserv==CLIENT) {
+    pthread_create(&ctrl_thread, NULL, &ctrl_loop_client, (void *) &ctrl_loop_args);
+  } else {
+    pthread_create(&ctrl_thread, NULL, &ctrl_loop_server, (void *) &ctrl_loop_args);
+  }
 
   /* cmd prompt */
   do {
