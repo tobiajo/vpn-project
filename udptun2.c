@@ -61,10 +61,8 @@ int debug;
 char *progname;
 
 /* udp tunnel */
-const size_t udp_key_len = 32;
-const size_t udp_iv_len  = 16;
-byte *udp_key = (byte *) "01234567890123456789012345678901";
-byte *udp_iv  = (byte *) "0123456789012345";
+byte udp_key[32];
+byte udp_iv[16];
 int udp_negotiation = 0;
 
 /**************************************************************************
@@ -675,7 +673,7 @@ void *udp_loop(void *args) {
       do_debug("TAP2UDP %lu: Read %d bytes from the tap interface\n", tap2net, nread);
 
       /* sign */
-      sign_it(buffer, plength, &sig, &slen, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, udp_key, udp_key_len));
+      sign_it(buffer, plength, &sig, &slen, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, udp_key, sizeof(udp_key)));
       assert(slen==sig_len);
       memcpy(buffer+plength, sig, sig_len);
       /* encrypt */
@@ -700,7 +698,7 @@ void *udp_loop(void *args) {
       rc = decrypt(buffer, nread, udp_key, udp_iv, plaintext);
       plength = rc-sig_len;
       /* verify */
-      verify_it(plaintext, plength, plaintext+plength, sig_len, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, udp_key, udp_key_len));
+      verify_it(plaintext, plength, plaintext+plength, sig_len, EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, udp_key, sizeof(udp_key)));
 
       /* now buffer[] contains a full packet or frame, write it into the tun/tap interface */ 
       nwrite = cwrite(tap_fd, plaintext, plength);
@@ -729,6 +727,7 @@ void *ctrl_loop(void *args) {
   unsigned long int cmd2net = 0, net2cmd = 0;
   int rc;
   char outbuf[BUFSIZE];
+  int i;
 
   BIO *for_reading = BIO_new(BIO_s_mem());
   BIO *for_writing = BIO_new(BIO_s_mem());
@@ -762,6 +761,7 @@ void *ctrl_loop(void *args) {
       cmd2net++;
 
       nread = cread(ctrl_fd_r, buffer, BUFSIZE);
+      buffer[nread] = '\0';
       do_debug("CMD2TCP %lu: Read %d bytes from the cmd prompt\n", cmd2net, nread);
 
       do {
@@ -771,9 +771,13 @@ void *ctrl_loop(void *args) {
           buffer[0] = 'k';
           buffer_len = 1;
 
-          /* TODO: generate new key, send to server */
-
-          // maybe send: 'k'+[new key]
+          // 'k'+[new iv]
+          RAND_bytes(udp_key, sizeof(udp_key));
+          do_debug("new key: %s\n", udp_key);
+          for (i=0; i<sizeof(udp_key); i++) {
+            buffer[i+1] = udp_key[i];
+            buffer_len++;
+          }
 
         } else if (strcmp(buffer, "change iv\n") == 0) {
           do_debug("from cmd: change iv\n");
@@ -781,13 +785,17 @@ void *ctrl_loop(void *args) {
           buffer[0] = 'i';
           buffer_len = 1;
 
-          /* TODO: generate new iv, send to server */
-
-          // maybe send: 'i'+[new iv]
+          // 'i'+[new iv]
+          RAND_bytes(udp_iv, sizeof(udp_iv));
+          do_debug("new iv: %s\n", udp_iv);
+          for (i=0; i<sizeof(udp_iv); i++) {
+            buffer[i+1] = udp_iv[i];
+            buffer_len++;
+          }
 
         } else if(strcmp(buffer, "break tunnel\n") == 0) {
           do_debug("from cmd: break tunnel\n");
-          udp_negotiation=1;
+          udp_negotiation=0;
           buffer[0] = 'b';
           buffer_len = 1;
 
@@ -827,12 +835,20 @@ void *ctrl_loop(void *args) {
       if (buffer[0] == 'k') {
         do_debug("from client: change key\n");
         udp_negotiation=1;
+        for (i=0; i<sizeof(udp_key); i++) {
+          udp_key[i] = buffer[i+1];
+        }
+        do_debug("new key: %s\n", udp_key);
 
         /* TODO: some stuff. what handshake protocol should we use? */
 
       } else if (buffer[0] == 'i') {
         do_debug("from client: change iv\n");
         udp_negotiation=1;
+        for (i=0; i<sizeof(udp_iv); i++) {
+          udp_iv[i] = buffer[i+1];
+        }
+        do_debug("new iv: %s\n", udp_iv);
 
         /* TODO: some stuff. what handshake protocol should we use? */
 
