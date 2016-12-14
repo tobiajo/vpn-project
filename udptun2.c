@@ -835,7 +835,6 @@ void *ctrl_loop_client(void *args) {
       if (buffer[0] == 'l') {
         do_debug("from server: ACCEPT change key\n");
         udp_negotiation=0;
-
       } else if (buffer[0] == 'j') {
         do_debug("from server: ACCEPT change iv\n");
         udp_negotiation=0;
