@@ -722,8 +722,9 @@ void *ctrl_loop_client(void *args) {
   SSL *ssl = ((struct ctrl_loop_args *) args)->ssl;
 
   char buffer[BUFSIZE];
+  char buffer2[BUFSIZE];
   int maxfd;
-  uint16_t nread, nwrite, plength, buffer_len;
+  uint16_t nread, nwrite, plength, buffer_len, buffer2_len;
   unsigned long int cmd2net = 0, net2cmd = 0;
   int rc;
   char outbuf[BUFSIZE];
@@ -736,22 +737,20 @@ void *ctrl_loop_client(void *args) {
   SSL_set_bio(ssl, for_reading, for_writing);
 
   // 'a'+[initial key]+[initial iv]
-  buffer[0] = 'a';
-  buffer_len++;
+  buffer2[0] = 'a';
+  buffer2_len = 1;
   //RAND_bytes(udp_key, sizeof(udp_key));
   for (i=0; i<sizeof(udp_key); i++) {
-    buffer[buffer_len] = udp_key[i];
-    buffer_len++;
+    buffer[buffer2_len++] = udp_key[i];
   }
   //RAND_bytes(udp_iv, sizeof(udp_iv));
   for (i=0; i<sizeof(udp_iv); i++) {
-    buffer[buffer_len] = udp_iv[i];
-    buffer_len++;
+    buffer2[buffer2_len] = udp_iv[i];
   }
-  rc = SSL_write(ssl, buffer, buffer_len);
+  rc = SSL_write(ssl, buffer2, buffer2_len);
   rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
-  //nwrite = send(net_fd, outbuf, rc, 0);
-  //do_debug("INIT2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);
+  nwrite = send(net_fd, outbuf, rc, 0);
+  do_debug("INIT2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);
 
   maxfd = (ctrl_fd_r > net_fd)?ctrl_fd_r:net_fd;
   
@@ -786,36 +785,34 @@ void *ctrl_loop_client(void *args) {
         if (strcmp(buffer, "change key\n") == 0) {
           do_debug("from cmd: change key\n");
           udp_negotiation=1;
-          buffer[0] = 'k';
-          buffer_len = 1;
+          buffer2[0] = 'k';
+          buffer2_len = 1;
 
           // 'k'+[new key]
           RAND_bytes(udp_key, sizeof(udp_key));
           do_debug("new key: %s\n", udp_key);
           for (i=0; i<sizeof(udp_key); i++) {
-            buffer[buffer_len] = udp_key[i];
-            buffer_len++;
+            buffer2[buffer2_len++] = udp_key[i];
           }
 
         } else if (strcmp(buffer, "change iv\n") == 0) {
           do_debug("from cmd: change iv\n");
           udp_negotiation=1;
-          buffer[0] = 'i';
-          buffer_len = 1;
+          buffer2[0] = 'i';
+          buffer2_len = 1;
 
           // 'i'+[new iv]
           RAND_bytes(udp_iv, sizeof(udp_iv));
           do_debug("new iv: %s\n", udp_iv);
           for (i=0; i<sizeof(udp_iv); i++) {
-            buffer[buffer_len] = udp_iv[i];
-            buffer_len++;
+            buffer2[buffer2_len++] = udp_iv[i];
           }
 
         } else if(strcmp(buffer, "break tunnel\n") == 0) {
           do_debug("from cmd: break tunnel\n");
           udp_negotiation=0;
-          buffer[0] = 'b';
-          buffer_len = 1;
+          buffer2[0] = 'b';
+          buffer2_len = 1;
 
           /* TODO: solve this problem */
 
@@ -826,7 +823,7 @@ void *ctrl_loop_client(void *args) {
 
         /* call OpenSSL to write out our buffer of data. */
         /* reminder: this actually writes it out to a memory bio */
-        rc = SSL_write(ssl, buffer, buffer_len);
+        rc = SSL_write(ssl, buffer2, buffer2_len);
         /* Read the actual packet to be sent out of the for_writing bio */
         rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
 
@@ -874,8 +871,9 @@ void *ctrl_loop_server(void *args) {
   SSL *ssl = ((struct ctrl_loop_args *) args)->ssl;
 
   char buffer[BUFSIZE];
+  char buffer2[BUFSIZE];
   int maxfd;
-  uint16_t nread, nwrite, plength, buffer_len;
+  uint16_t nread, nwrite, plength, buffer_len, buffer2_len;
   unsigned long int cmd2net = 0, net2cmd = 0;
   int rc;
   char outbuf[BUFSIZE];
@@ -932,11 +930,12 @@ void *ctrl_loop_server(void *args) {
         }
         udp_negotiation = 0;
 
-        buffer[0] = 'b';
-        rc = SSL_write(ssl, buffer, 1);
+        buffer2[0] = 'b';
+        buffer2_len = 1;
+        rc = SSL_write(ssl, buffer2, buffer2_len);
         rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
         nwrite = send(net_fd, outbuf, rc, 0);
-        do_debug("TCP2CMD %lu: Written %d bytes to the network\n", cmd2net, nwrite); 
+        do_debug("TCP2CMD %lu: Written %d bytes to the network\n", cmd2net, nwrite);
       }
       else if (buffer[0] == 'k') {
         do_debug("from client: change key\n");
