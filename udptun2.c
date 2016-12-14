@@ -739,7 +739,7 @@ void *ctrl_loop_client(void *args) {
   // 'a'+[initial key]+[initial iv]
   buffer2[0] = 'a';
   buffer2_len = 1;
-  //RAND_bytes(udp_key, sizeof(udp_key));
+  RAND_bytes(udp_key, sizeof(udp_key));
   for (i=0; i<sizeof(udp_key); i++) {
     buffer[buffer2_len++] = udp_key[i];
   }
@@ -790,7 +790,6 @@ void *ctrl_loop_client(void *args) {
 
           // 'k'+[new key]
           RAND_bytes(udp_key, sizeof(udp_key));
-          do_debug("new key: %s\n", udp_key);
           for (i=0; i<sizeof(udp_key); i++) {
             buffer2[buffer2_len++] = udp_key[i];
           }
@@ -803,7 +802,6 @@ void *ctrl_loop_client(void *args) {
 
           // 'i'+[new iv]
           RAND_bytes(udp_iv, sizeof(udp_iv));
-          do_debug("new iv: %s\n", udp_iv);
           for (i=0; i<sizeof(udp_iv); i++) {
             buffer2[buffer2_len++] = udp_iv[i];
           }
@@ -926,7 +924,7 @@ void *ctrl_loop_server(void *args) {
           udp_key[i] = buffer[i+1];
         }
         for (i=0; i<sizeof(udp_iv); i++) {
-          udp_iv[i] = buffer[i+1+sizeof(udp_key)];
+          //udp_iv[i] = buffer[i+1+sizeof(udp_key)];
         }
         udp_negotiation = 0;
 
