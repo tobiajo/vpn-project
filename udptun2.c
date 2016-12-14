@@ -64,6 +64,7 @@ char *progname;
 byte udp_key[32];
 byte udp_iv[16];
 int udp_negotiation = 1;
+int udp_break = 0;
 
 /**************************************************************************
  * tun_alloc: allocates or reconnects to a tun/tap device. The caller     *
@@ -645,7 +646,7 @@ void *udp_loop(void *args) {
   /* use select() to handle two descriptors at once */
   maxfd = (tap_fd > udp_fd)?tap_fd:udp_fd;
 
-  while(1) {
+  while(!udp_break) {
     int ret;
     fd_set rd_set;
 
@@ -705,6 +706,9 @@ void *udp_loop(void *args) {
       do_debug("UDP2TAP %lu: Written %d bytes to the tap interface\n", net2tap, nwrite);
     }
   }
+
+  close(udp_fd);
+  do_debug("udp_loop: good bye!");
 }
 
 /**************************************************************************
@@ -808,11 +812,9 @@ void *ctrl_loop_client(void *args) {
 
         } else if(strcmp(buffer, "break tunnel\n") == 0) {
           do_debug("from cmd: break tunnel\n");
-          udp_negotiation=0;
+          udp_break=1;
           buffer2[0] = 'b';
           buffer2_len = 1;
-
-          /* TODO: solve this problem */
 
         } else {
           printf("from cmd: invalid command!\n");
@@ -962,9 +964,7 @@ void *ctrl_loop_server(void *args) {
 
       } else if(buffer[0] == 'b') {
         do_debug("from client: break tunnel\n");
-        udp_negotiation=1;
-
-        /* TODO: some stuff. what handshake protocol should we use? */
+        udp_break=1;
 
       } else {
         printf("from client: invalid command!\n");
