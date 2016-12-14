@@ -743,6 +743,10 @@ void *ctrl_loop_client(void *args) {
   for (i=0; i<sizeof(udp_key); i++) {
     buffer2[buffer2_len++] = udp_key[i];
   }
+  RAND_bytes(udp_iv, sizeof(udp_iv));
+  for (i=0; i<sizeof(udp_iv); i++) {
+    buffer2[buffer2_len++] = udp_iv[i];
+  }
   rc = SSL_write(ssl, buffer2, buffer2_len);
   rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
   nwrite = send(net_fd, outbuf, rc, 0);
@@ -918,6 +922,9 @@ void *ctrl_loop_server(void *args) {
         do_debug("from client: initial key and iv\n");
         for (i=0; i<sizeof(udp_key); i++) {
           udp_key[i] = buffer[i+1];
+        }
+        for (i=0; i<sizeof(udp_iv); i++) {
+          udp_iv[i] = buffer[i+1+sizeof(udp_key)];
         }
 
         udp_negotiation = 0;
