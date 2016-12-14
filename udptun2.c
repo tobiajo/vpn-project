@@ -816,6 +816,17 @@ void *ctrl_loop_client(void *args) {
           buffer2[0] = 'b';
           buffer2_len = 1;
 
+        } else if(strcmp(buffer, "show secrets\n") == 0) {
+          printf("udp tunnel key: ");
+          for (i=0; i<sizeof(udp_key); i++) {
+            printf("%x", udp_key[i]);
+          }
+          printf("\nudp tunnel iv: ");
+          for (i=0; i<sizeof(udp_iv); i++) {
+            printf("%x", udp_iv[i]);
+          }
+          printf("\n");
+          break;
         } else {
           printf("from cmd: invalid command!\n");
           break;
