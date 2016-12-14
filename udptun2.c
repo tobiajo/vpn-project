@@ -708,7 +708,7 @@ void *udp_loop(void *args) {
   }
 
   close(udp_fd);
-  do_debug("udp_loop: good bye!");
+  do_debug("udp_loop: good bye!\n");
 }
 
 /**************************************************************************
