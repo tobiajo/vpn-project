@@ -831,6 +831,18 @@ void *ctrl_loop_client(void *args) {
       rc = SSL_read(ssl, buffer, BUFSIZE);
       /* at this point buf will store the results (with a length of rc) */
       do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
+
+      if (buffer[0] == 'l') {
+        do_debug("from server: ACCEPT change key\n");
+        udp_negotiation=1;
+
+      } else if (buffer[0] == 'j') {
+        do_debug("from server: ACCEPT change iv\n");
+        udp_negotiation=1;
+      } else {
+        printf("from server: invalid command!\n");
+        break;
+      }
     }
   }
 }
@@ -891,23 +903,29 @@ void *ctrl_loop_server(void *args) {
 
       if (buffer[0] == 'k') {
         do_debug("from client: change key\n");
-        udp_negotiation=1;
         for (i=0; i<sizeof(udp_key); i++) {
           udp_key[i] = buffer[i+1];
         }
         do_debug("new key: %s\n", udp_key);
 
-        /* TODO: some stuff. what handshake protocol should we use? */
+        buffer[0] = 'l';
+        rc = SSL_write(ssl, buffer, 1);
+        rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
+        nwrite = send(net_fd, outbuf, rc, 0);
+        do_debug("TCP2CMD %lu: Written %d bytes to the network\n", cmd2net, nwrite); 
 
       } else if (buffer[0] == 'i') {
         do_debug("from client: change iv\n");
-        udp_negotiation=1;
         for (i=0; i<sizeof(udp_iv); i++) {
           udp_iv[i] = buffer[i+1];
         }
         do_debug("new iv: %s\n", udp_iv);
 
-        /* TODO: some stuff. what handshake protocol should we use? */
+        buffer[0] = 'j';
+        rc = SSL_write(ssl, buffer, 1);
+        rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
+        nwrite = send(net_fd, outbuf, rc, 0);
+        do_debug("TCP2CMD %lu: Written %d bytes to the network\n", cmd2net, nwrite); 
 
 
       } else if(buffer[0] == 'b') {
