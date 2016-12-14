@@ -741,16 +741,12 @@ void *ctrl_loop_client(void *args) {
   buffer2_len = 1;
   RAND_bytes(udp_key, sizeof(udp_key));
   for (i=0; i<sizeof(udp_key); i++) {
-    buffer[buffer2_len++] = udp_key[i];
-  }
-  //RAND_bytes(udp_iv, sizeof(udp_iv));
-  for (i=0; i<sizeof(udp_iv); i++) {
-    buffer2[buffer2_len] = udp_iv[i];
+    buffer2[buffer2_len++] = udp_key[i];
   }
   rc = SSL_write(ssl, buffer2, buffer2_len);
   rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
   nwrite = send(net_fd, outbuf, rc, 0);
-  do_debug("INIT2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);
+  do_debug("CMD2TCP %lu: Written %d bytes to the network\n", cmd2net, nwrite);
 
   maxfd = (ctrl_fd_r > net_fd)?ctrl_fd_r:net_fd;
   
@@ -923,14 +919,11 @@ void *ctrl_loop_server(void *args) {
         for (i=0; i<sizeof(udp_key); i++) {
           udp_key[i] = buffer[i+1];
         }
-        for (i=0; i<sizeof(udp_iv); i++) {
-          //udp_iv[i] = buffer[i+1+sizeof(udp_key)];
-        }
+
         udp_negotiation = 0;
 
-        buffer2[0] = 'b';
-        buffer2_len = 1;
-        rc = SSL_write(ssl, buffer2, buffer2_len);
+        buffer[0] = 'b';
+        rc = SSL_write(ssl, buffer, 1);
         rc = BIO_read(for_writing, outbuf, sizeof(outbuf));
         nwrite = send(net_fd, outbuf, rc, 0);
         do_debug("TCP2CMD %lu: Written %d bytes to the network\n", net2cmd, nwrite);
