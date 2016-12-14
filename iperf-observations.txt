@@ -1,0 +1,45 @@
+
+[12/14/2016 12:16] seed@ubuntu:~$ iperf -c 10.0.20.100
+------------------------------------------------------------
+Client connecting to 10.0.20.100, TCP port 5001
+TCP window size: 21.0 KByte (default)
+------------------------------------------------------------
+[  3] local 10.0.10.100 port 53856 connected with 10.0.20.100 port 5001
+[ ID] Interval       Transfer     Bandwidth
+[  3]  0.0-10.0 sec   145 MBytes   122 Mbits/sec
+
+
+----------------------------- with SSL (TCP data channel) --------------------------------------------------------
+[12/10/2016 13:49] seed@ubuntu:~$ iperf -c 10.0.20.100
+------------------------------------------------------------
+Client connecting to 10.0.20.100, TCP port 5001
+TCP window size: 21.0 KByte (default)
+------------------------------------------------------------
+[  3] local 10.0.10.100 port 50822 connected with 10.0.20.100 port 5001
+[ ID] Interval       Transfer     Bandwidth
+[  3]  0.0-10.0 sec   110 MBytes  92.4 Mbits/sec
+
+
+--------------------------------with ssl (udp data channel) -----------------------------------
+[12/14/2016 11:33] seed@ubuntu:~$ iperf -c 10.0.20.100
+------------------------------------------------------------
+Client connecting to 10.0.20.100, TCP port 5001
+TCP window size: 21.0 KByte (default)
+------------------------------------------------------------
+[  3] local 10.0.10.100 port 53851 connected with 10.0.20.100 port 5001
+[ ID] Interval       Transfer     Bandwidth
+[  3]  0.0-10.0 sec  33.0 MBytes  27.6 Mbits/sec
+
+ PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND                                                                           
+ 4072 root      20   0 42824  21m 1372 S 59.6  2.1   0:37.64 udptun2 
+ 
+ -------------------------------------------------------------------------------------
+ 
+ 
+
+
+
+
+
+
+
