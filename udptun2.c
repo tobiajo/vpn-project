@@ -1161,7 +1161,7 @@ int main(int argc, char *argv[]) {
 
   /* cmd prompt */
   do {
-    printf("> ");
+    //printf("> ");
     int line_len = getline(&line, &bufsize, stdin);
     if (cliserv==CLIENT) {
       cwrite(ctrl_fd_w, line, line_len);
