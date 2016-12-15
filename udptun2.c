@@ -195,6 +195,10 @@ void usage(void) {
 /**************************************************************************
  * START evp functions.                                                   *
  **************************************************************************/
+// the evp functions are taken from:
+// https://wiki.openssl.org/index.php/EVP_Symmetric_Encryption_and_Decryption
+// https://wiki.openssl.org/index.php/EVP_Signing_and_Verifying
+
 void handleErrors(void) {
   ERR_print_errors_fp(stderr);
   abort();
@@ -708,7 +712,7 @@ void *udp_loop(void *args) {
   }
 
   close(udp_fd);
-  do_debug("udp_loop: good bye!\n");
+  printf("udp_loop: good bye!\n");
 }
 
 /**************************************************************************
@@ -859,14 +863,14 @@ void *ctrl_loop_client(void *args) {
       do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
 
       if (buffer[0] == 'b') {
-        do_debug("from server: ACCEPT initial key and iv\n");
+        printf("from server: ACCEPT initial key and iv\n");
         udp_negotiation=0;
       }
       else if (buffer[0] == 'l') {
-        do_debug("from server: ACCEPT change key\n");
+        printf("from server: ACCEPT change key\n");
         udp_negotiation=0;
       } else if (buffer[0] == 'j') {
-        do_debug("from server: ACCEPT change iv\n");
+        printf("from server: ACCEPT change iv\n");
         udp_negotiation=0;
       } else {
         printf("from server: invalid command!\n");
@@ -932,7 +936,7 @@ void *ctrl_loop_server(void *args) {
       do_debug("TCP2CMD %lu: Written %d bytes to the buffer\n", net2cmd, rc);
 
       if (buffer[0] == 'a') {
-        do_debug("from client: initial key and iv\n");
+        printf("from client: initial key and iv\n");
         for (i=0; i<sizeof(udp_key); i++) {
           udp_key[i] = buffer[i+1];
         }
@@ -949,7 +953,7 @@ void *ctrl_loop_server(void *args) {
         do_debug("TCP2CMD %lu: Written %d bytes to the network\n", net2cmd, nwrite);
       }
       else if (buffer[0] == 'k') {
-        do_debug("from client: change key\n");
+        printf("from client: change key\n");
         for (i=0; i<sizeof(udp_key); i++) {
           udp_key[i] = buffer[i+1];
         }
@@ -961,7 +965,7 @@ void *ctrl_loop_server(void *args) {
         do_debug("TCP2CMD %lu: Written %d bytes to the network\n", cmd2net, nwrite); 
 
       } else if (buffer[0] == 'i') {
-        do_debug("from client: change iv\n");
+        printf("from client: change iv\n");
         for (i=0; i<sizeof(udp_iv); i++) {
           udp_iv[i] = buffer[i+1];
         }
@@ -974,7 +978,7 @@ void *ctrl_loop_server(void *args) {
 
 
       } else if(buffer[0] == 'b') {
-        do_debug("from client: break tunnel\n");
+        printf("from client: break tunnel\n");
         udp_break=1;
 
       } else {

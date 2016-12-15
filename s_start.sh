@@ -6,4 +6,4 @@ ee()
 	eval $@
 }
 
-ee "sudo ./udptun2 -i tun0 -s -d"
+ee "sudo ./udptun2 -i tun0 -s"
