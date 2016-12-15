@@ -3,7 +3,8 @@
  *                                                                        *
  * Derived from:                                                          *
  *   http://www.cis.syr.edu/~wedu/seed/Labs/VPN/files/simpletun.c         *
- **************************************************************************/ 
+ *   and the provided resource "demo_openssl_api"                         *
+ **************************************************************************/
 
 #include <stdio.h>
 #include <stdlib.h>
